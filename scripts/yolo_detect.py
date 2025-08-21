@@ -331,6 +331,8 @@ fps_avg_len = 200
 img_count = 0
 low_conf_frame_count = 0
 
+start_time = int(time.time() * 1000)  # millisecond timestamp
+
 # Begin inference loop
 while True:
 
@@ -498,12 +500,11 @@ while True:
                 )
 
         # Save both frames
-        timestamp = int(time.time() * 1000)  # millisecond timestamp
         original_filename = (
-            low_conf_dir / f"frame_{low_conf_frame_count:04d}_{timestamp}.jpg"
+            low_conf_dir / f"{start_time}_{low_conf_frame_count:04d}.jpg"
         )
         annotated_filename = (
-            low_conf_dir / f"frame_{low_conf_frame_count:04d}_{timestamp}_annotated.jpg"
+            low_conf_dir / f"{start_time}_{low_conf_frame_count:04d}_annotated.jpg"
         )
 
         cv2.imwrite(str(original_filename), ori_img)
