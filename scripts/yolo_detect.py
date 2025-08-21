@@ -47,8 +47,8 @@ parser.add_argument(
     "--thresh",
     "-t",
     type=float,
-    help="Minimum confidence threshold for displaying detected objects. Default 0.5",
-    default=0.5,
+    help="Minimum confidence threshold for displaying detected objects. Default 0.0",
+    default=0.0,
 )
 parser.add_argument(
     "--resolution",
@@ -68,6 +68,12 @@ parser.add_argument(
     help='Device to run inference on: "cpu", "cuda", "cuda:0", "cuda:1", etc. Default: auto-detect',
     default=None,
 )
+parser.add_argument(
+    "--save-low-conf-frame",
+    type=float,
+    help="Save frames containing low confidence detections. Default 0 (disabled)",
+    default=0.0,
+)
 
 args = parser.parse_args()
 
@@ -79,6 +85,7 @@ min_thresh = args.thresh
 user_res = args.resolution
 record = args.record
 device = args.device
+save_low_conf = args.save_low_conf_frame
 
 # Auto-detect device if not specified
 if device is None:
@@ -117,7 +124,24 @@ else:
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
             print(f"Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
 
-print(f"Using device: {device}")
+print("Settings:")
+print(f"  Model: {model_path}")
+print(f"  Source: {img_source}")
+print(f"  Device: {device}")
+print(f"  Confidence threshold: {min_thresh}")
+print(f"  Record: {record}")
+if record:
+    print(f"  Resolution: {user_res}")
+print(f"  Saving low confidence frames: {save_low_conf > 0}")
+if save_low_conf > 0:
+    print(f"  Low confidence frame threshold: {save_low_conf}")
+print()
+
+# Create directory for low confidence frames if needed
+if save_low_conf > 0.0:
+    low_conf_dir = Path("low_confidence_frames")
+    low_conf_dir.mkdir(exist_ok=True)
+    print(f"Low confidence frames will be saved to: {low_conf_dir}")
 
 # Check if model file exists and is valid
 if not model_path.exists():
@@ -186,14 +210,14 @@ if record:
         print("Recording only works for video and camera sources. Please try again.")
         sys.exit(0)
     if not user_res:
-        print("Please specify resolution to record video at.")
+        print("Please specify resolution to record video at, example '640x480'")
         sys.exit(0)
 
     # Set up recording
-    record_name = "demo1.avi"
+    record_name = "output-video.mp4"
     record_fps = 30
     recorder = cv2.VideoWriter(
-        record_name, cv2.VideoWriter_fourcc(*"MJPG"), record_fps, (res_w, res_h)
+        record_name, cv2.VideoWriter_fourcc(*"mp4v"), record_fps, (res_w, res_h)
     )
 
 print("Keyboard shortcuts:")
@@ -260,6 +284,7 @@ avg_frame_rate = 0
 frame_rate_buffer = []
 fps_avg_len = 200
 img_count = 0
+low_conf_frame_count = 0
 
 # Begin inference loop
 while True:
@@ -315,10 +340,18 @@ while True:
     detections = results[0].boxes
 
     # Filter detections by confidence threshold efficiently
+    has_low_conf_objects = False
     if detections is not None and len(detections) > 0:
         # Get confidence scores and filter indices
         confidences = detections.conf.cpu().numpy()
         valid_indices = confidences > min_thresh
+
+        # Check for low confidence objects (confidence <= save_low_conf)
+        if save_low_conf:
+            low_conf_indices = confidences <= save_low_conf
+            has_low_conf_objects = np.any(low_conf_indices)
+
+            ori_img = results[0].orig_img.copy()
 
         if np.any(valid_indices):
             # Vectorized extraction of all valid detections
@@ -346,6 +379,7 @@ while True:
                     label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
                 )
                 label_ymin = max(ymin, labelSize[1] + 10)
+                # Draw label background
                 cv2.rectangle(
                     frame,
                     (xmin, label_ymin - labelSize[1] - 10),
@@ -353,6 +387,7 @@ while True:
                     color,
                     cv2.FILLED,
                 )
+                # Draw label text
                 cv2.putText(
                     frame,
                     label,
@@ -366,6 +401,73 @@ while True:
             object_count = 0
     else:
         object_count = 0
+
+    if save_low_conf > 0 and has_low_conf_objects:
+        # Create annotated frame with low confidence detections
+        annotated_frame = ori_img.copy()
+
+        # Draw low confidence detections on annotated frame
+        low_conf_indices = confidences <= save_low_conf
+        if np.any(low_conf_indices):
+            low_conf_xyxy = detections.xyxy.cpu().numpy()[low_conf_indices].astype(int)
+            low_conf_classes = (
+                detections.cls.cpu().numpy()[low_conf_indices].astype(int)
+            )
+            low_conf_confidences = confidences[low_conf_indices]
+
+            for bbox, classidx, conf in zip(
+                low_conf_xyxy, low_conf_classes, low_conf_confidences
+            ):
+                xmin, ymin, xmax, ymax = bbox
+                classname = labels[classidx]
+                color = (0, 255, 255)  # Yellow color for low confidence detections
+
+                # Draw bounding box
+                cv2.rectangle(annotated_frame, (xmin, ymin), (xmax, ymax), color, 2)
+
+                # Draw label
+                label = f"{classname}: {int(conf*100)}%"
+                labelSize, baseLine = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+                )
+                label_ymin = max(ymin, labelSize[1] + 10)
+
+                # Draw label background
+                cv2.rectangle(
+                    annotated_frame,
+                    (xmin, label_ymin - labelSize[1] - 10),
+                    (xmin + labelSize[0], label_ymin + baseLine - 10),
+                    color,
+                    cv2.FILLED,
+                )
+
+                # Draw label text
+                cv2.putText(
+                    annotated_frame,
+                    label,
+                    (xmin, label_ymin - 7),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 0),
+                    1,
+                )
+
+        # Save both frames
+        timestamp = int(time.time() * 1000)  # millisecond timestamp
+        original_filename = (
+            low_conf_dir / f"frame_{low_conf_frame_count:04d}_{timestamp}.jpg"
+        )
+        annotated_filename = (
+            low_conf_dir / f"frame_{low_conf_frame_count:04d}_{timestamp}_annotated.jpg"
+        )
+
+        cv2.imwrite(str(original_filename), ori_img)
+        cv2.imwrite(str(annotated_filename), annotated_frame)
+
+        low_conf_frame_count += 1
+        print(
+            f"Saved low confidence frame #{low_conf_frame_count}: {original_filename.name}, {annotated_filename.name}"
+        )
 
     # Calculate and draw framerate (if using video, USB, or Picamera source)
     if source_type in ["video", "usb", "picamera"]:
