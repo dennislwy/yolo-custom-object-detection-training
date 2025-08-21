@@ -151,12 +151,15 @@ if not model_path.exists():
 # Load the model into memory and get labemap
 try:
     model = YOLO(model_path, task="detect")
-    model.to(device)  # Move model to specified device
+    model.to(device)
     labels = model.names
-    print(f"Model loaded successfully on '{device}'")
+    print(f"Model loaded successfully on '{device}' with {len(labels)} classes")
+except FileNotFoundError:
+    print(f"ERROR: Model file '{model_path}' not found.")
+    sys.exit(1)
 except Exception as e:
-    print(f"Error loading model: {e}")
-    sys.exit(0)
+    print(f"ERROR: Failed to load model '{model_path}': {e}")
+    sys.exit(1)
 
 # Parse input to determine if image source is a file, folder, video, or USB camera
 img_ext_list = [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG", ".bmp", ".BMP"]
@@ -199,10 +202,16 @@ resize = False
 if user_res:
     try:
         res_w, res_h = map(int, user_res.split("x"))
+        if res_w <= 0 or res_h <= 0:
+            raise ValueError("Resolution values must be positive")
+        if res_w > 4096 or res_h > 4096:
+            print("Warning: Very high resolution may impact performance")
         resize = True
-    except (ValueError, IndexError):
-        print(f"Invalid resolution format: {user_res}. Use format like '640x480'")
-        sys.exit(0)
+    except (ValueError, IndexError) as e:
+        print(
+            f"Invalid resolution format: {user_res}. Use format like '640x480'. Error: {e}"
+        )
+        sys.exit(1)
 
 # Check if output is valid and set up recording
 if output:
