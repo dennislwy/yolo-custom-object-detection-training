@@ -85,7 +85,7 @@ if device is None:
         device = "cuda"
         gpu_name = torch.cuda.get_device_name(0)
         gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-        print(f"CUDA detected. Using GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+        print(f"CUDA detected. Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
     else:
         device = "cpu"
         print("CUDA not available. Using CPU for inference.")
@@ -100,9 +100,22 @@ else:
                 if gpu_idx >= torch.cuda.device_count():
                     print(f"GPU {gpu_idx} not available. Using default CUDA device.")
                     device = "cuda"
+                else:
+                    # Show specific GPU info
+                    gpu_name = torch.cuda.get_device_name(gpu_idx)
+                    gpu_memory = (
+                        torch.cuda.get_device_properties(gpu_idx).total_memory / 1024**3
+                    )
+                    print(f"Using GPU {gpu_idx}: {gpu_name} ({gpu_memory:.1f} GB)")
             except (ValueError, IndexError):
                 print("Invalid CUDA device format. Using default CUDA device.")
                 device = "cuda"
+        else:
+            # Show default GPU info
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
+
 print(f"Using device: {device}")
 
 # Check if model file exists and is valid

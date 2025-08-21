@@ -8,11 +8,13 @@ authors = [
 license = {text = "MIT"}
 readme = "README.md"
 package-mode = false
-requires-python = ">=3.11,<4"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "pillow (>=11.3.0,<12.0.0)",
     "opencv-python (>=4.12.0.88,<5.0.0.0)",
-    "ultralytics (>=8.3.182,<9.0.0)"
+    "ultralytics (>=8.3.182,<9.0.0)",
+    "torch (>=2.8.0,<3.0.0)",
+    "torchvision (>=0.23.0,<0.24.0)",
 ]
 
 
@@ -20,6 +22,22 @@ dependencies = [
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
+# Stable builds with CUDA 12.6
+[[tool.poetry.source]]
+name = "torch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+priority = "explicit"
+
+# Nightly (or future stable) builds with CUDA 12.8
+[[tool.poetry.source]]
+name = "torch-cu128"
+url = "https://download.pytorch.org/whl/nightly/cu128"
+priority = "explicit"
+
 [tool.poetry.group.dev.dependencies]
 notebook = "^7.4.5"
 
+
+[tool.poetry.dependencies]
+torch = {source = "torch-cu126"}
+torchvision = {source = "torch-cu126"}
