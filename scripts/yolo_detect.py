@@ -6,6 +6,7 @@ import time
 
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 
 # Define and parse user input arguments
@@ -15,38 +16,42 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-    # Predict on single image (minimum confidence threshold 70%%)
+    # Predict on single image using GPU (minimum confidence threshold 70%%)
+    python %(prog)s --model my_model.pt --source test.jpg --thresh 0.7 --device cuda
+
+    # Predict on video file using CPU
+    python %(prog)s --model my_model.pt --source testvid.mp4 --thresh 0.7 --device cpu
+
+    # Predict on USB camera using specific GPU
+    python %(prog)s --model my_model.pt --source usb0 --thresh 0.7 --device cuda:1
+
+    # Auto-detect device (default)
     python %(prog)s --model my_model.pt --source test.jpg --thresh 0.7
-
-    # Predict on video file
-    python %(prog)s --model my_model.pt --source testvid.mp4 --thresh 0.7
-
-    # Predict on USB camera
-    python %(prog)s --model my_model.pt --source usb0 --thresh 0.7
-
-    # Predict on PiCamera
-    python %(prog)s --model my_model.pt --source picamera0 --thresh 0.7
     """,
 )
 parser.add_argument(
     "--model",
+    "-m",
     help='Path to YOLO model file (example: "my_model.pt")',
     required=True,
 )
 parser.add_argument(
     "--source",
+    "-s",
     help='Image source, can be image file ("test.jpg"), \
                     image folder ("test_dir"), video file ("testvid.mp4"), index of USB camera ("usb0"), or index of Picamera ("picamera0")',
     required=True,
 )
 parser.add_argument(
     "--thresh",
+    "-t",
     type=float,
-    help='Minimum confidence threshold for displaying detected objects (example: "0.4")',
+    help="Minimum confidence threshold for displaying detected objects. Default 0.5",
     default=0.5,
 )
 parser.add_argument(
     "--resolution",
+    "-r",
     help='Resolution in WxH to display inference results at (example: "640x480"), \
                     otherwise, match source resolution',
     default=None,
@@ -55,6 +60,12 @@ parser.add_argument(
     "--record",
     help='Record results from video or webcam and save it as "demo1.avi". Must specify --resolution argument to record.',
     action="store_true",
+)
+parser.add_argument(
+    "--device",
+    "-d",
+    help='Device to run inference on: "cpu", "cuda", "cuda:0", "cuda:1", etc. Default: auto-detect',
+    default=None,
 )
 
 args = parser.parse_args()
@@ -66,6 +77,33 @@ img_source = args.source
 min_thresh = args.thresh
 user_res = args.resolution
 record = args.record
+device = args.device
+
+# Auto-detect device if not specified
+if device is None:
+    if torch.cuda.is_available():
+        device = "cuda"
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        print(f"CUDA detected. Using GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+    else:
+        device = "cpu"
+        print("CUDA not available. Using CPU for inference.")
+else:
+    if device.startswith("cuda"):
+        if not torch.cuda.is_available():
+            print("CUDA not available. Falling back to CPU.")
+            device = "cpu"
+        elif device != "cuda" and ":" in device:
+            try:
+                gpu_idx = int(device.split(":")[1])
+                if gpu_idx >= torch.cuda.device_count():
+                    print(f"GPU {gpu_idx} not available. Using default CUDA device.")
+                    device = "cuda"
+            except (ValueError, IndexError):
+                print("Invalid CUDA device format. Using default CUDA device.")
+                device = "cuda"
+print(f"Using device: {device}")
 
 # Check if model file exists and is valid
 if not os.path.exists(model_path):
@@ -77,7 +115,9 @@ if not os.path.exists(model_path):
 # Load the model into memory and get labemap
 try:
     model = YOLO(model_path, task="detect")
+    model.to(device)  # Move model to specified device
     labels = model.names
+    print(f"Model loaded successfully on '{device}'")
 except Exception as e:
     print(f"Error loading model: {e}")
     sys.exit(0)
@@ -249,7 +289,7 @@ while True:
         frame = cv2.resize(frame, (resW, resH))
 
     # Run inference on frame
-    results = model(frame, verbose=False)
+    results = model(frame, verbose=False, device=device)
 
     # Extract results
     detections = results[0].boxes
