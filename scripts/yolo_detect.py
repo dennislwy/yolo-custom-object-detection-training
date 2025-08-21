@@ -293,7 +293,7 @@ elif source_type == "folder":
     filelist = glob.glob(img_source + "/*")
     for file in filelist:
         _, file_ext = os.path.splitext(file)
-        if file_ext in img_ext_list:
+        if file_ext in img_ext_list or file_ext in vid_ext_list:
             imgs_list.append(file)
 
 elif source_type in ["video", "usb"]:
@@ -359,11 +359,29 @@ while True:
         "folder",
     ]:  # If source is image or image folder, load the image using its filename
         if img_count >= len(imgs_list):
-            print("All images have been processed. Exiting program.")
+            print("All files have been processed. Exiting program.")
             sys.exit(0)
-        img_filename = imgs_list[img_count]
-        frame = cv2.imread(img_filename)
-        img_count += 1
+
+        current_file = imgs_list[img_count]
+        _, file_ext = os.path.splitext(current_file)
+
+        if file_ext in img_ext_list:
+            # Handle image file
+            frame = cv2.imread(current_file)
+            img_count += 1
+        elif file_ext in vid_ext_list:
+            # Handle video file
+            if "folder_video_cap" not in locals() or folder_video_cap is None:
+                folder_video_cap = cv2.VideoCapture(current_file)
+                print(f"Processing video file: {current_file}")
+
+            ret, frame = folder_video_cap.read()
+            if not ret:
+                # Video ended, move to next file
+                folder_video_cap.release()
+                folder_video_cap = None
+                img_count += 1
+                continue
 
     elif (
         source_type == "video"
@@ -612,6 +630,12 @@ if source_type in ["video", "usb"]:
     cap.release()
 elif source_type == "picamera":
     cap.stop()
+elif (
+    source_type == "folder"
+    and "folder_video_cap" in locals()
+    and folder_video_cap is not None
+):
+    folder_video_cap.release()
 if output:
     video_writer.release()
 cv2.destroyAllWindows()

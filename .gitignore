@@ -1,8 +1,10 @@
 dataset/
 runs/
-train/
+train*/
 *.zip
 *.pt
+low_confidence*/
+no_detection*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
