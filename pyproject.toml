@@ -10,7 +10,8 @@ readme = "README.md"
 package-mode = false
 requires-python = ">=3.11,<4"
 dependencies = [
-    "pillow (>=11.3.0,<12.0.0)"
+    "pillow (>=11.3.0,<12.0.0)",
+    "opencv-python (>=4.12.0.88,<5.0.0.0)"
 ]
 
 

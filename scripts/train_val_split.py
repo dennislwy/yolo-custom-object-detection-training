@@ -5,6 +5,8 @@ This script randomly splits images (and their corresponding annotation files)
 from a dataset into train and validation sets, and copies them into
 appropriately named folders.
 
+Based on https://github.com/EdjeElectronics/Train-and-Deploy-YOLO-Models/blob/main/utils/train_val_split.py
+
 Args:
     --datapath (str): Path to the data folder containing 'images' and 'labels' subfolders.
     --train_pct (float, optional): Ratio of images to go to the train folder (default: 0.8).

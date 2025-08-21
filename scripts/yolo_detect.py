@@ -10,10 +10,27 @@ from ultralytics import YOLO
 
 # Define and parse user input arguments
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(
+    description="YOLOv11 Object Detection Utility",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog="""
+Examples:
+    # Predict on single image with minimum confidence threshold 70%
+    python %(prog)s --model my_model.pt --source test.jpg --thresh 0.7
+
+    # Predict on video file
+    python %(prog)s --model my_model.pt --source testvid.mp4
+
+    # Predict on USB camera
+    python %(prog)s --model my_model.pt --source usb0
+
+    # Predict on PiCamera
+    python %(prog)s --model my_model.pt --source picamera0
+    """,
+)
 parser.add_argument(
     "--model",
-    help='Path to YOLO model file (example: "runs/detect/train/weights/best.pt")',
+    help='Path to YOLO model file (example: "my_model.pt")',
     required=True,
 )
 parser.add_argument(
@@ -58,8 +75,12 @@ if not os.path.exists(model_path):
     sys.exit(0)
 
 # Load the model into memory and get labemap
-model = YOLO(model_path, task="detect")
-labels = model.names
+try:
+    model = YOLO(model_path, task="detect")
+    labels = model.names
+except Exception as e:
+    print(f"Error loading model: {e}")
+    sys.exit(0)
 
 # Parse input to determine if image source is a file, folder, video, or USB camera
 img_ext_list = [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG", ".bmp", ".BMP"]
@@ -67,6 +88,7 @@ vid_ext_list = [".avi", ".mov", ".mp4", ".mkv", ".wmv"]
 
 if os.path.isdir(img_source):
     source_type = "folder"
+
 elif os.path.isfile(img_source):
     _, ext = os.path.splitext(img_source)
     if ext in img_ext_list:
@@ -76,12 +98,22 @@ elif os.path.isfile(img_source):
     else:
         print(f"File extension {ext} is not supported.")
         sys.exit(0)
+
 elif "usb" in img_source:
     source_type = "usb"
-    usb_idx = int(img_source[3:])
+    try:
+        usb_idx = int(img_source[3:])
+    except ValueError:
+        print(f"Invalid USB camera index: {img_source}")
+        sys.exit(0)
+
 elif "picamera" in img_source:
     source_type = "picamera"
-    picam_idx = int(img_source[8:])
+    try:
+        picam_idx = int(img_source[8:])
+    except ValueError:
+        print(f"Invalid PiCamera index: {img_source}")
+        sys.exit(0)
 else:
     print(f"Input {img_source} is invalid. Please try again.")
     sys.exit(0)
@@ -89,8 +121,12 @@ else:
 # Parse user-specified display resolution
 resize = False
 if user_res:
-    resize = True
-    resW, resH = int(user_res.split("x")[0]), int(user_res.split("x")[1])
+    try:
+        resW, resH = map(int, user_res.split("x"))
+        resize = True
+    except (ValueError, IndexError):
+        print(f"Invalid resolution format: {user_res}. Use format like '640x480'")
+        sys.exit(0)
 
 # Check if recording is valid and set up recording
 if record:
@@ -111,6 +147,7 @@ if record:
 # Load or initialize image source
 if source_type == "image":
     imgs_list = [img_source]
+
 elif source_type == "folder":
     imgs_list = []
     filelist = glob.glob(img_source + "/*")
@@ -118,8 +155,8 @@ elif source_type == "folder":
         _, file_ext = os.path.splitext(file)
         if file_ext in img_ext_list:
             imgs_list.append(file)
-elif source_type in ["video", "usb"]:
 
+elif source_type in ["video", "usb"]:
     if source_type == "video":
         cap_arg = img_source
     elif source_type == "usb":
@@ -132,7 +169,11 @@ elif source_type in ["video", "usb"]:
         ret = cap.set(4, resH)
 
 elif source_type == "picamera":
-    from picamera2 import Picamera2
+    try:
+        from picamera2 import Picamera2
+    except ImportError:
+        print("Picamera2 not installed. Install with: pip install picamera2")
+        sys.exit(0)
 
     cap = Picamera2()
     cap.configure(
@@ -166,15 +207,16 @@ while True:
     t_start = time.perf_counter()
 
     # Load frame from image source
-    if (
-        source_type == "image" or source_type == "folder"
-    ):  # If source is image or image folder, load the image using its filename
+    if source_type in [
+        "image",
+        "folder",
+    ]:  # If source is image or image folder, load the image using its filename
         if img_count >= len(imgs_list):
             print("All images have been processed. Exiting program.")
             sys.exit(0)
         img_filename = imgs_list[img_count]
         frame = cv2.imread(img_filename)
-        img_count = img_count + 1
+        img_count += 1
 
     elif (
         source_type == "video"
@@ -203,7 +245,7 @@ while True:
             break
 
     # Resize frame to desired display resolution
-    if resize == True:
+    if resize is True:
         frame = cv2.resize(frame, (resW, resH))
 
     # Run inference on frame
@@ -266,10 +308,10 @@ while True:
             )  # Draw label text
 
             # Basic example: count the number of objects in the image
-            object_count = object_count + 1
+            object_count += 1
 
     # Calculate and draw framerate (if using video, USB, or Picamera source)
-    if source_type == "video" or source_type == "usb" or source_type == "picamera":
+    if source_type in ["video", "usb", "picamera"]:
         cv2.putText(
             frame,
             f"FPS: {avg_frame_rate:0.2f}",
@@ -294,15 +336,16 @@ while True:
     if record:
         recorder.write(frame)
 
-    # If inferencing on individual images, wait for user keypress before moving to next image. Otherwise, wait 5ms before moving to next frame.
-    if source_type == "image" or source_type == "folder":
+    # If inferencing on individual images, wait for user keypress before moving to next image.
+    # Otherwise, wait 5ms before moving to next frame.
+    if source_type in ["image", "folder"]:
         key = cv2.waitKey()
-    elif source_type == "video" or source_type == "usb" or source_type == "picamera":
-        key = cv2.waitKey(5)
+    elif source_type in ["video", "usb", "picamera"]:
+        key = cv2.waitKey(5)  # wait 5ms
 
     if key == ord("q") or key == ord("Q"):  # Press 'q' to quit
         break
-    elif key == ord("s") or key == ord("S"):  # Press 's' to pause inference
+    if key == ord("s") or key == ord("S"):  # Press 's' to pause inference
         cv2.waitKey()
     elif key == ord("p") or key == ord(
         "P"
@@ -315,10 +358,8 @@ while True:
 
     # Append FPS result to frame_rate_buffer (for finding average FPS over multiple frames)
     if len(frame_rate_buffer) >= fps_avg_len:
-        temp = frame_rate_buffer.pop(0)
-        frame_rate_buffer.append(frame_rate_calc)
-    else:
-        frame_rate_buffer.append(frame_rate_calc)
+        frame_rate_buffer.pop(0)
+    frame_rate_buffer.append(frame_rate_calc)
 
     # Calculate average FPS for past frames
     avg_frame_rate = np.mean(frame_rate_buffer)
