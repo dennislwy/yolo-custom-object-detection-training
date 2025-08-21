@@ -74,6 +74,12 @@ parser.add_argument(
     help="Save frames containing low confidence detections. Default 0 (disabled)",
     default=0.0,
 )
+parser.add_argument(
+    "--save-no-detection-frame",
+    "-n",
+    help="Save frames with no detections. Default False (disabled)",
+    action="store_true",
+)
 
 args = parser.parse_args()
 
@@ -86,6 +92,7 @@ user_res = args.resolution
 output = args.output
 device = args.device
 save_low_conf = args.save_low_conf_frame
+save_no_detection = args.save_no_detection_frame
 
 # Auto-detect device if not specified
 if device is None:
@@ -135,6 +142,7 @@ if output:
 print(f"  Saving low confidence frames: {save_low_conf > 0}")
 if save_low_conf > 0:
     print(f"  Low confidence frame threshold: {save_low_conf}")
+print(f"  Saving no detection frames: {save_no_detection}")
 print()
 
 # Create directory for low confidence frames if needed
@@ -142,6 +150,12 @@ if save_low_conf > 0.0:
     low_conf_dir = Path("low_confidence_frames")
     low_conf_dir.mkdir(exist_ok=True)
     print(f"Low confidence frames will be saved to: {low_conf_dir}")
+
+# Create directory for no detection frames if needed
+if save_no_detection:
+    no_detection_dir = Path("no_detection_frames")
+    no_detection_dir.mkdir(exist_ok=True)
+    print(f"No detection frames will be saved to: {no_detection_dir}")
 
 # Check if model file exists and is valid
 if not model_path.exists():
@@ -330,6 +344,7 @@ frame_rate_buffer = []
 fps_avg_len = 200
 img_count = 0
 low_conf_frame_count = 0
+no_detection_frame_count = 0
 
 start_time = int(time.time() * 1000)  # millisecond timestamp
 
@@ -448,6 +463,28 @@ while True:
             object_count = 0
     else:
         object_count = 0
+
+    # Save frame if no detections and feature is enabled
+    if save_no_detection and object_count == 0:
+        if source_type in ["image", "folder"]:
+            # For images, use the original frame
+            save_frame = frame.copy()
+        else:
+            # For video/camera sources, use the original frame from results
+            save_frame = (
+                results[0].orig_img.copy()
+                if hasattr(results[0], "orig_img")
+                else frame.copy()
+            )
+
+        no_detection_filename = (
+            no_detection_dir / f"{start_time}_{no_detection_frame_count:04d}.jpg"
+        )
+        cv2.imwrite(str(no_detection_filename), save_frame)
+        no_detection_frame_count += 1
+        print(
+            f"Saved no detection frame #{no_detection_frame_count}: {no_detection_filename.name}"
+        )
 
     if save_low_conf > 0 and has_low_conf_objects:
         # Create annotated frame with low confidence detections
@@ -568,7 +605,6 @@ while True:
 
     # Calculate average FPS for past frames
     avg_frame_rate = np.mean(frame_rate_buffer)
-
 
 # Clean up
 print(f"Average pipeline FPS: {avg_frame_rate:.2f}")
