@@ -15,17 +15,17 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-    # Predict on single image with minimum confidence threshold 70%
+    # Predict on single image (minimum confidence threshold 70%%)
     python %(prog)s --model my_model.pt --source test.jpg --thresh 0.7
 
     # Predict on video file
-    python %(prog)s --model my_model.pt --source testvid.mp4
+    python %(prog)s --model my_model.pt --source testvid.mp4 --thresh 0.7
 
     # Predict on USB camera
-    python %(prog)s --model my_model.pt --source usb0
+    python %(prog)s --model my_model.pt --source usb0 --thresh 0.7
 
     # Predict on PiCamera
-    python %(prog)s --model my_model.pt --source picamera0
+    python %(prog)s --model my_model.pt --source picamera0 --thresh 0.7
     """,
 )
 parser.add_argument(
