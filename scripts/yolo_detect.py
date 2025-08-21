@@ -10,24 +10,22 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-# Define and parse user input arguments
+DEFAULT_FPS = 25
+DEFAULT_WH = "640x480"
 
 parser = argparse.ArgumentParser(
-    description="YOLOv11 Object Detection Utility",
+    description="YOLO Object Detection Utility",
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-    # Predict on single image using GPU (minimum confidence threshold 70%%)
-    python %(prog)s --model my_model.pt --source test.jpg --thresh 0.7 --device cuda
-
-    # Predict on video file using CPU
-    python %(prog)s --model my_model.pt --source testvid.mp4 --thresh 0.7 --device cpu
+    # Predict on single image (minimum confidence threshold 70%%)
+    python %(prog)s --model my_model.pt --source test.jpg --thresh 0.7
 
     # Predict on USB camera using specific GPU
     python %(prog)s --model my_model.pt --source usb0 --thresh 0.7 --device cuda:1
 
-    # Auto-detect device (default)
-    python %(prog)s --model my_model.pt --source test.jpg --thresh 0.7
+    # Save low confidence detections
+    python %(prog)s --model my_model.pt --source test.mp4 --thresh 0.7 --save-low-conf-frame 0.5
     """,
 )
 parser.add_argument(
@@ -58,8 +56,9 @@ parser.add_argument(
     default=None,
 )
 parser.add_argument(
-    "--record",
-    help='Record results from video or webcam and save it as "demo1.avi". Must specify --resolution argument to record.',
+    "--output",
+    "-o",
+    help='Output inference results from video or webcam and save it as "output-video.mp4"',
     action="store_true",
 )
 parser.add_argument(
@@ -70,6 +69,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--save-low-conf-frame",
+    "-l",
     type=float,
     help="Save frames containing low confidence detections. Default 0 (disabled)",
     default=0.0,
@@ -83,7 +83,7 @@ model_path = Path(args.model)
 img_source = args.source
 min_thresh = args.thresh
 user_res = args.resolution
-record = args.record
+output = args.output
 device = args.device
 save_low_conf = args.save_low_conf_frame
 
@@ -129,8 +129,8 @@ print(f"  Model: {model_path}")
 print(f"  Source: {img_source}")
 print(f"  Device: {device}")
 print(f"  Confidence threshold: {min_thresh}")
-print(f"  Record: {record}")
-if record:
+print(f"  Output video: {output}")
+if output:
     print(f"  Resolution: {user_res}")
 print(f"  Saving low confidence frames: {save_low_conf > 0}")
 if save_low_conf > 0:
@@ -204,20 +204,56 @@ if user_res:
         print(f"Invalid resolution format: {user_res}. Use format like '640x480'")
         sys.exit(0)
 
-# Check if recording is valid and set up recording
-if record:
-    if source_type not in ["video", "usb"]:
-        print("Recording only works for video and camera sources. Please try again.")
-        sys.exit(0)
-    if not user_res:
-        print("Please specify resolution to record video at, example '640x480'")
+# Check if output is valid and set up recording
+if output:
+    if source_type not in ["video", "usb", "picamera"]:
+        print(
+            "Output video only works for video, camera, and picamera sources. Please try again."
+        )
         sys.exit(0)
 
-    # Set up recording
-    record_name = "output-video.mp4"
-    record_fps = 30
-    recorder = cv2.VideoWriter(
-        record_name, cv2.VideoWriter_fourcc(*"mp4v"), record_fps, (res_w, res_h)
+    # Get source resolution and FPS if not specified by user
+    if not user_res:
+        if source_type == "video":
+            # Get video properties
+            temp_cap = cv2.VideoCapture(img_source)
+            res_w = int(temp_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            res_h = int(temp_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            record_fps = temp_cap.get(cv2.CAP_PROP_FPS)
+            temp_cap.release()
+            print(
+                f"Using source video resolution: {res_w}x{res_h} @ {record_fps:.1f} FPS"
+            )
+        elif source_type == "usb":
+            # For USB camera, use default resolution and FPS
+            res_w, res_h = map(int, DEFAULT_WH.split("x"))
+            record_fps = DEFAULT_FPS
+            print(
+                f"Using default USB camera resolution: {res_w}x{res_h} @ {record_fps} FPS"
+            )
+        elif source_type == "picamera":
+            # For picamera, use default resolution and FPS
+            res_w, res_h = map(int, DEFAULT_WH.split("x"))
+            record_fps = DEFAULT_FPS
+            print(
+                f"Using default Picamera resolution: {res_w}x{res_h} @ {record_fps} FPS"
+            )
+    else:
+        # Use user-specified resolution
+        if source_type == "video":
+            # Get source FPS for video
+            temp_cap = cv2.VideoCapture(img_source)
+            record_fps = temp_cap.get(cv2.CAP_PROP_FPS)
+            temp_cap.release()
+            print(f"Using source video FPS: {record_fps:.1f}")
+        else:
+            record_fps = DEFAULT_FPS
+            print(f"Using default FPS: {record_fps}")
+
+    # Set up output video writer
+    output_name = "output-video.mp4"
+    video_writer = cv2.VideoWriter(
+        output_name, cv2.VideoWriter_fourcc(*"mp4v"), record_fps, (res_w, res_h)
     )
 
 print("Keyboard shortcuts:")
@@ -244,8 +280,8 @@ elif source_type in ["video", "usb"]:
         cap_arg = usb_idx
     cap = cv2.VideoCapture(cap_arg)
 
-    # Set camera or video resolution if specified by user
-    if user_res:
+    # Set camera or video resolution if specified by user or if outputting without user resolution
+    if user_res or (output and not user_res and source_type == "usb"):
         ret = cap.set(3, res_w)
         ret = cap.set(4, res_h)
 
@@ -492,8 +528,8 @@ while True:
         2,
     )  # Draw total number of detected objects
     cv2.imshow("YOLO detection results", frame)  # Display image
-    if record:
-        recorder.write(frame)
+    if output:
+        video_writer.write(frame)
 
     # If inferencing on individual images, wait for user keypress before moving to next image.
     # Otherwise, wait 5ms before moving to next frame.
@@ -530,6 +566,6 @@ if source_type in ["video", "usb"]:
     cap.release()
 elif source_type == "picamera":
     cap.stop()
-if record:
-    recorder.release()
+if output:
+    video_writer.release()
 cv2.destroyAllWindows()
