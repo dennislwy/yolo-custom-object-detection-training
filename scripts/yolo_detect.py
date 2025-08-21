@@ -3,6 +3,7 @@ import glob
 import os
 import sys
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -72,7 +73,7 @@ args = parser.parse_args()
 
 
 # Parse user inputs
-model_path = args.model
+model_path = Path(args.model)
 img_source = args.source
 min_thresh = args.thresh
 user_res = args.resolution
@@ -119,11 +120,9 @@ else:
 print(f"Using device: {device}")
 
 # Check if model file exists and is valid
-if not os.path.exists(model_path):
-    print(
-        "ERROR: Model path is invalid or model was not found. Make sure the model filename was entered correctly."
-    )
-    sys.exit(0)
+if not model_path.exists():
+    print(f"ERROR: Model file '{model_path}' not found.")
+    sys.exit(1)
 
 # Load the model into memory and get labemap
 try:
@@ -175,7 +174,7 @@ else:
 resize = False
 if user_res:
     try:
-        resW, resH = map(int, user_res.split("x"))
+        res_w, res_h = map(int, user_res.split("x"))
         resize = True
     except (ValueError, IndexError):
         print(f"Invalid resolution format: {user_res}. Use format like '640x480'")
@@ -194,8 +193,13 @@ if record:
     record_name = "demo1.avi"
     record_fps = 30
     recorder = cv2.VideoWriter(
-        record_name, cv2.VideoWriter_fourcc(*"MJPG"), record_fps, (resW, resH)
+        record_name, cv2.VideoWriter_fourcc(*"MJPG"), record_fps, (res_w, res_h)
     )
+
+print("Keyboard shortcuts:")
+print("  'p' - Pause/Resume")
+print("  's' - Save screenshot")
+print("  'q' - Quit")
 
 # Load or initialize image source
 if source_type == "image":
@@ -218,8 +222,8 @@ elif source_type in ["video", "usb"]:
 
     # Set camera or video resolution if specified by user
     if user_res:
-        ret = cap.set(3, resW)
-        ret = cap.set(4, resH)
+        ret = cap.set(3, res_w)
+        ret = cap.set(4, res_h)
 
 elif source_type == "picamera":
     try:
@@ -230,7 +234,9 @@ elif source_type == "picamera":
 
     cap = Picamera2()
     cap.configure(
-        cap.create_video_configuration(main={"format": "RGB888", "size": (resW, resH)})
+        cap.create_video_configuration(
+            main={"format": "RGB888", "size": (res_w, res_h)}
+        )
     )
     cap.start()
 
@@ -247,6 +253,7 @@ bbox_colors = [
     (98, 118, 150),
     (172, 176, 184),
 ]
+
 
 # Initialize control and status variables
 avg_frame_rate = 0
@@ -299,69 +306,66 @@ while True:
 
     # Resize frame to desired display resolution
     if resize is True:
-        frame = cv2.resize(frame, (resW, resH))
+        frame = cv2.resize(frame, (res_w, res_h))
 
     # Run inference on frame
     results = model(frame, verbose=False, device=device)
 
-    # Extract results
+    # Extract results with confidence filtering
     detections = results[0].boxes
 
-    # Initialize variable for basic object counting example
-    object_count = 0
+    # Filter detections by confidence threshold efficiently
+    if detections is not None and len(detections) > 0:
+        # Get confidence scores and filter indices
+        confidences = detections.conf.cpu().numpy()
+        valid_indices = confidences > min_thresh
 
-    # Go through each detection and get bbox coords, confidence, and class
-    for i in range(len(detections)):
+        if np.any(valid_indices):
+            # Vectorized extraction of all valid detections
+            xyxy = detections.xyxy.cpu().numpy()[valid_indices].astype(int)
+            classes = detections.cls.cpu().numpy()[valid_indices].astype(int)
+            conf_filtered = confidences[valid_indices]
 
-        # Get bounding box coordinates
-        # Ultralytics returns results in Tensor format, which have to be converted to a regular Python array
-        xyxy_tensor = detections[
-            i
-        ].xyxy.cpu()  # Detections in Tensor format in CPU memory
-        xyxy = xyxy_tensor.numpy().squeeze()  # Convert tensors to Numpy array
-        xmin, ymin, xmax, ymax = xyxy.astype(
-            int
-        )  # Extract individual coordinates and convert to int
+            # Count objects efficiently
+            object_count = len(conf_filtered)
 
-        # Get bounding box class ID and name
-        classidx = int(detections[i].cls.item())
-        classname = labels[classidx]
+            # Draw all bounding boxes efficiently
+            for i, (bbox, classidx, conf) in enumerate(
+                zip(xyxy, classes, conf_filtered)
+            ):
+                xmin, ymin, xmax, ymax = bbox
+                classname = labels[classidx]
+                color = bbox_colors[classidx % 10]
 
-        # Get bounding box confidence
-        conf = detections[i].conf.item()
+                # Draw bounding box
+                cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
 
-        # Draw box if confidence threshold is high enough
-        if conf > min_thresh:
-
-            color = bbox_colors[classidx % 10]
-            cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
-
-            label = f"{classname}: {int(conf*100)}%"
-            labelSize, baseLine = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
-            )  # Get font size
-            label_ymin = max(
-                ymin, labelSize[1] + 10
-            )  # Make sure not to draw label too close to top of window
-            cv2.rectangle(
-                frame,
-                (xmin, label_ymin - labelSize[1] - 10),
-                (xmin + labelSize[0], label_ymin + baseLine - 10),
-                color,
-                cv2.FILLED,
-            )  # Draw white box to put label text in
-            cv2.putText(
-                frame,
-                label,
-                (xmin, label_ymin - 7),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 0, 0),
-                1,
-            )  # Draw label text
-
-            # Basic example: count the number of objects in the image
-            object_count += 1
+                # Draw label
+                label = f"{classname}: {int(conf*100)}%"
+                labelSize, baseLine = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+                )
+                label_ymin = max(ymin, labelSize[1] + 10)
+                cv2.rectangle(
+                    frame,
+                    (xmin, label_ymin - labelSize[1] - 10),
+                    (xmin + labelSize[0], label_ymin + baseLine - 10),
+                    color,
+                    cv2.FILLED,
+                )
+                cv2.putText(
+                    frame,
+                    label,
+                    (xmin, label_ymin - 7),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 0),
+                    1,
+                )
+        else:
+            object_count = 0
+    else:
+        object_count = 0
 
     # Calculate and draw framerate (if using video, USB, or Picamera source)
     if source_type in ["video", "usb", "picamera"]:
@@ -398,11 +402,11 @@ while True:
 
     if key == ord("q") or key == ord("Q"):  # Press 'q' to quit
         break
-    if key == ord("s") or key == ord("S"):  # Press 's' to pause inference
+    if key == ord("p") or key == ord("P"):  # Press 'p' to pause inference
         cv2.waitKey()
-    elif key == ord("p") or key == ord(
-        "P"
-    ):  # Press 'p' to save a picture of results on this frame
+    elif key == ord("s") or key == ord(
+        "S"
+    ):  # Press 's' to save a picture of results on this frame
         cv2.imwrite("capture.png", frame)
 
     # Calculate FPS for this frame
