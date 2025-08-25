@@ -3,6 +3,7 @@ runs/
 train*/
 *.zip
 *.pt
+*.mp4
 low_confidence*/
 no_detection*/
 
